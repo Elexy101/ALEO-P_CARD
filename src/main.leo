@@ -6,7 +6,7 @@
 //++ upcoming project and can serve as a whitelist to projects, just a test:) ++
 //==============================================================================
 
-program aleo_card_v6.aleo {
+program aleo_card_v7.aleo {
 
     record card {
         owner: address,
@@ -42,7 +42,6 @@ program aleo_card_v6.aleo {
         admin: address,
     }
 
-
     //TestToken => Testing token (MAX PER USER -> 10,000 token)
     struct TestToken {
         name: field,
@@ -51,6 +50,12 @@ program aleo_card_v6.aleo {
         faucet_circulating_supply: u64,
         faucet_total_supply: u64,
         admin: address,
+    }
+
+    struct LOAN_EXIST {
+        loan_id: field,
+        no_of_loan: u64,
+        active: bool,
     }
 
     // On-chain storage of an `account` map, with `address` as the key,
@@ -71,6 +76,9 @@ program aleo_card_v6.aleo {
 
     //now i am the admin of the test token owning over 6000000u64 token
     mapping test_token: u64 => TestToken;
+
+    //mapping loans to owner
+    mapping loan_existing: address => LOAN_EXIST;
 
     //check address = self.caller
     inline check_addr(owner: address) -> bool {
@@ -181,7 +189,7 @@ program aleo_card_v6.aleo {
         return (my_faucet, finalize_get_faucet(owner, amt));
     }
     
-    async function finalize_get_faucet(public owner: address, public amt: u64) {
+    async function finalize_get_faucet(owner: address, amt: u64) {
 
         let test_token_info: TestToken = Mapping::get_or_use(test_token, 10000000u64, TestToken {
             name: 4577111110111112111108121field,
@@ -202,6 +210,80 @@ program aleo_card_v6.aleo {
         //Increments `account[owner]` by  `amount`.
         let owner_amount: u64 = Mapping::get_or_use(account, owner, 0u64);
         Mapping::set(account, owner, owner_amount + amt);
+
+        Mapping::set(test_token, 10000000u64, TestToken {
+            name: test_token_info.name,
+            symbol: test_token_info.symbol,
+            decimals: test_token_info.decimals,
+            faucet_circulating_supply: test_token_info.faucet_circulating_supply + amt,
+            faucet_total_supply: test_token_info.faucet_total_supply,
+            admin: test_token_info.admin,
+        });
+
+    }
+
+
+    //================ LOAN FAUCET TO TEST ====================
+    async transition loan_faucet(loanee: address, owner: address, number: u64, cvv: u8) -> (card, Future) {
+        check_addr(owner);
+        let hash_number: u64 = BHP256:: hash_to_u64(owner);
+        let hash_cvv: u8 = BHP256:: hash_to_u8(owner);
+
+        let amt: u64 = 200u64; //amount to begin to loan as test from another user
+
+
+        let my_faucet : card = card {
+            owner: owner,
+            number: hash_number,
+            cvv: hash_cvv,
+            amt: amt,
+        };
+
+        return (my_faucet, finalize_loan_faucet(owner, loanee, amt));
+    }
+    
+    async function finalize_loan_faucet(owner: address, loanee: address, amt: u64) {
+
+        let test_token_info: TestToken = Mapping::get_or_use(test_token, 10000000u64, TestToken {
+            name: 4577111110111112111108121field,
+            symbol: 4577111110111112111108121field,
+            decimals: 6u8,
+            faucet_circulating_supply: 0u64,
+            faucet_total_supply: 0u64,
+            admin: aleo1az8p9vlllyqwtj0c2g9svkd0e5v0p3zzdflwwrpa7kpe8xrfxgfqqpru7m,
+        });
+
+        //check if user have faucet already, otherwise throw error
+        let faucet_exists: u64 = Mapping::get(account, owner) | 0u64;
+        assert_eq(faucet_exists, 0u64);
+        //checks if loanee have enough faucet to loan
+        let faucet_exists_for_loanee: u64 = Mapping::get(account, loanee) | 0u64;
+        assert_eq(faucet_exists_for_loanee, 0u64);
+
+        //checking if faucet_circulating supply < amount is less than 4million token[4,000 users only]
+        assert(test_token_info.faucet_circulating_supply <= 4000000u64);
+
+        //Decrements `account[loanee]` by  `amount`.
+        let loanee_amount: u64 = Mapping::get_or_use(account, loanee, 0u64);
+        Mapping::set(account, loanee, loanee_amount - amt);
+
+        //Increments `account[owner]` by  `amount`.
+        let owner_amount: u64 = Mapping::get_or_use(account, owner, 0u64);
+        Mapping::set(account, owner, owner_amount + amt);
+
+        //loans exists now for owner
+        let loan_id: field =  BHP256:: hash_to_field(loanee);
+        let loans_exist: LOAN_EXIST = Mapping::get_or_use(loan_existing, owner, LOAN_EXIST{
+            loan_id: loan_id,
+            no_of_loan: 0u64,
+            active: false
+        });
+        Mapping::set(loan_existing, owner, LOAN_EXIST{
+            loan_id: loans_exist.loan_id,
+            no_of_loan: 1u64 + loans_exist.no_of_loan,
+            active: true,
+        });
+
 
         Mapping::set(test_token, 10000000u64, TestToken {
             name: test_token_info.name,
@@ -267,6 +349,50 @@ program aleo_card_v6.aleo {
             estate_id: hash_estate_id,
             stocks_id: call_item.stocks_id,
         });
+    }
+
+
+
+    //================================================================================
+    //====================== BUILD ASSET IF LOAN NOT EXIST ===========================
+    //============= IF LOAN EXIST, DEDUCT INTEREST FROM OWNER ========================
+    async transition build_estate_asset(owner: address, asset_id: u64) -> (Future){
+        return finalize_build_estate_asset(self.caller, asset_id);
+    }
+    async function finalize_build_estate_asset(owner: address, asset_id: u64){
+        
+        //check if user have faucet already, otherwise throw error
+        let faucet_exists: u64 = Mapping::get(account, owner) | 0u64;
+        assert_eq(faucet_exists, 0u64);
+
+        //lets hash the owner
+        let hash_owner: u64 = BHP256:: hash_to_u64(owner);
+
+        //calling the mapping from the struct ITEM_ID
+        let call_item: ITEM_ID = Mapping::get_or_use(item_id, asset_id, ITEM_ID {
+            food_id: 0u64,
+            travel_id: 0u64,
+            estate_id: 0u64,
+            stocks_id: 0u64,
+        });
+
+        assert(call_item.estate_id == asset_id);
+
+        //before building an asset, checks if owner has a loan active 
+        let loan_id: field =  BHP256:: hash_to_field(owner);
+        let loans_exist: LOAN_EXIST = Mapping::get_or_use(loan_existing, owner, LOAN_EXIST{
+            loan_id: loan_id,
+            no_of_loan: 0u64,
+            active: false
+        });
+
+        assert(loans_exist.active == true || loans_exist.active == false);
+        //set loan interest for owner if loan exist = true, otherwise build asset accumulating 50 balance added up
+        let loan_interest: u64 = 50u64; 
+
+        //checking if loans exist is active to execute command
+        Mapping::set(account, owner, (loans_exist.active == true || loans_exist.active == false) ? faucet_exists - (loans_exist.no_of_loan * loan_interest) : faucet_exists + (loans_exist.no_of_loan *loan_interest));
+
     }
 
 
