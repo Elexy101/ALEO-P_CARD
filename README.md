@@ -30,8 +30,15 @@ Aleo-One Pass is an innovative zero-knowledge proof card generated through the L
 
      ## LEO-CLI
      `leo run purchasing_estate <address> <number1>u64 <number2>u8`
+5. **Loan Faucet**
+   - The self.caller will be able to loan a fixed amount of faucet from another user if only the user have the available fixed amount by the program
+   - The fixed amount lend to the self.caller will hold an interest such that building an asset, specific amount is deducted on interest hold
+   - The lender will get additional faucet for every time the user build an asset
+  
+     ## LEO-CLI
+     `leo run loan_faucet <loanee> <owner> <number>u64 <cvv>u8`
 
-5. **Send an Asset**
+7. **Send an Asset**
    - The self.caller of the card owner can send an asset based on its ID associated with their card to another owner
    - As a testing phase 1, send this asset to an owner who have not gotten faucet nor purchase any unique asset
 
